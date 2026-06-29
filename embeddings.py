@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
 FastEmbed wrapper: all-MiniLM-L6-v2 (384-dim, ONNX, runs on CPU).
-No GPU and no API key required. Model cache: ~/.cache/fastembed/ (~23MB, downloaded once).
+No GPU and no API key required. Model cache: ~/.cache/fastembed/ (~23 MB, downloaded once).
 """
-import warnings
-warnings.filterwarnings("ignore")  # suppress urllib3/SSL warnings
-
 import sys
+import warnings
 from pathlib import Path
-from fastembed import TextEmbedding
 from functools import lru_cache
 from typing import List
+
 import numpy as np
+
+# FastEmbed / onnxruntime / urllib3 emit import-time warnings we cannot act on.
+# Scope the suppression to this import rather than silencing the whole process.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    from fastembed import TextEmbedding
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 MODEL_CACHE = Path.home() / ".cache" / "fastembed"

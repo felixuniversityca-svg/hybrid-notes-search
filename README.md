@@ -7,27 +7,31 @@ It combines two search methods and fuses them with Reciprocal Rank Fusion:
 - **0.7 vector search** (cosine similarity, [sqlite-vec](https://github.com/asg017/sqlite-vec)) for meaning and paraphrases
 - **0.3 keyword search** (BM25, SQLite FTS5) for exact terms, names, and rare words
 
-So a search for "how do I combine two ranked lists" finds a note about Reciprocal Rank Fusion even though the note never uses the word in the query.
+So a note that never contains the words you typed can still be the top result, because the vector half matches on meaning.
 
 ## Demo
 
 ```
-$ python search.py "how do I combine two ranked lists"
+$ python search.py "running models on my laptop without the cloud"
 
-Top 3 results for 'how do I combine two ranked lists'
+Top 3 results for 'running models on my laptop without the cloud'
 ------------------------------------------------------------
-[1] score=0.0115
-    reciprocal-rank-fusion.md
-    # Reciprocal Rank Fusion  Reciprocal Rank Fusion (RRF) is a simple, robust way
-    to combine several ranked result lists into one...
+[1] score=0.0164
+    local-embeddings.md
+    # Running embeddings locally  You do not need an API to embed text.
+    all-MiniLM-L6-v2 is a small sentence embedding model ... runs on CPU ...
 
-[2] score=0.0113
+[2] score=0.0161
+    reciprocal-rank-fusion.md
+    # Reciprocal Rank Fusion  ... a simple way to combine several ranked
+    result lists into one ...
+
+[3] score=0.0159
     vector-vs-keyword-search.md
-    # Vector search versus keyword search  Keyword search (BM25 over an inverted
-    index, like SQLite FTS5) matches the exact terms a user types...
+    # Vector search versus keyword search  ...
 ```
 
-The query shares no words with the top result. That is the vector half doing its job; the keyword half pulls in exact-term matches the embeddings would miss.
+The top note never uses the words "laptop" or "cloud", yet it ranks first because the meaning matches. The keyword half complements this by pulling in exact-term hits that embeddings blur (codes, names, jargon).
 
 ## Requirements
 
@@ -69,8 +73,29 @@ Re-running `index.py` is incremental: it only re-embeds files whose modification
 
 1. **Index** (`index.py`): every `.md` file is split into overlapping ~300-word chunks (40-word overlap), YAML frontmatter stripped. Each chunk is embedded and stored in SQLite.
 2. **Store** (`db.py`): one SQLite file holds three tables, kept in sync by triggers: `chunks` (text + embedding blob + mtime), `chunks_fts` (FTS5 for BM25), `vec_chunks` (sqlite-vec for cosine).
-3. **Search** (`search.py`): the query is embedded once, then run through both the vector and keyword indexes. The two ranked lists are merged with RRF, `score = sum(weight / (k + rank))` with `k = 60`, so a chunk ranked highly by both methods wins.
+3. **Search** (`search.py`): the query is embedded once, then run through both indexes. The keyword query is sanitized into OR-of-quoted-tokens so FTS5 operator characters (a `-` means NOT) stay literal and a single missing word does not drop the row. The two ranked lists are merged with RRF, `score = sum(weight / (k + rank))` with `k = 60`, so a chunk ranked highly by both methods wins.
 4. **Embed** (`embeddings.py`): `all-MiniLM-L6-v2` (384-dim) via FastEmbed, ONNX on CPU, cached at `~/.cache/fastembed`.
+
+Vector search always returns the nearest chunks, so even an off-topic query yields its closest matches rather than nothing.
+
+## Evaluation
+
+`eval.py` is a small reproducible benchmark: it indexes a labeled corpus (`eval/corpus/`) and scores each retrieval method on a fixed query set. The queries are chosen to be honest about the tradeoff, some are paraphrases with no shared words (vector should win), some are exact technical terms (keyword should win).
+
+```
+method          Hit@1   Hit@3    MRR
+vector-only      8/8     8/8     1.000
+keyword-only     6/8     8/8     0.875
+hybrid           8/8     8/8     1.000
+```
+
+Read it honestly: hybrid matches the better component on every query and never does worse. Keyword-only trails because it misses paraphrases whose words are absent from the note; dense vectors handle those. On this small, clean corpus vector retrieval is already strong, so hybrid ties it here rather than beating it. The value of fusion is robustness: it inherits the strengths of both without you knowing in advance which a query needs, and the keyword half is what saves exact identifiers and rare terms on larger, messier corpora. Reproduce with `python eval.py`.
+
+## Tests
+
+```bash
+python test_search.py     # unit checks for the RRF merge, no DB or model needed
+```
 
 ## Tech
 

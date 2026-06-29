@@ -11,9 +11,6 @@ Usage:
 Point it at any folder of Markdown:
     NOTES_DIR=~/my-notes python index.py
 """
-import warnings
-warnings.filterwarnings("ignore")
-
 import sys
 import time
 import numpy as np
@@ -75,10 +72,15 @@ def index_file(conn, path: Path) -> int:
     if existing and existing["file_mtime"] == mtime:
         return 0  # unchanged
 
-    # Delete old chunks (triggers also clean FTS5)
+    # Delete old vectors first: capture the ids while the chunks rows still
+    # exist, then drop the chunks (a trigger keeps FTS5 in sync). Deleting
+    # chunks first would leave the vec_chunks rows orphaned forever.
+    old_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM chunks WHERE file_path = ?", (str(path),))]
+    if old_ids:
+        conn.executemany("DELETE FROM vec_chunks WHERE rowid = ?",
+                         [(i,) for i in old_ids])
     conn.execute("DELETE FROM chunks WHERE file_path = ?", (str(path),))
-    conn.execute("DELETE FROM vec_chunks WHERE rowid IN "
-                 "(SELECT id FROM chunks WHERE file_path = ?)", (str(path),))
 
     text = path.read_text(encoding="utf-8", errors="ignore")
     chunks = chunk_text(text)
@@ -158,6 +160,7 @@ def main():
             else:
                 skipped += 1
         except Exception as e:
+            # Skip an unreadable/problematic file but report it loudly.
             print(f"  Error indexing {path.name}: {e}")
 
         if (i + 1) % 20 == 0:

@@ -3,9 +3,6 @@
 SQLite layer: sqlite-vec (vector search) + FTS5 (keyword/BM25 search).
 All state lives in a single file (see config.DB_PATH).
 """
-import warnings
-warnings.filterwarnings("ignore")
-
 import sqlite3
 import sqlite_vec
 
@@ -45,9 +42,9 @@ def init_db():
     """
     Create tables if they don't exist.
     Schema:
-      chunks       — source of truth (file_path, chunk text, embedding blob, mtime)
-      chunks_fts   — FTS5 virtual table mirroring chunks.text for keyword search
-      vec_chunks   — sqlite-vec virtual table for vector similarity search
+      chunks       source of truth (file_path, chunk text, embedding blob, mtime)
+      chunks_fts   FTS5 virtual table mirroring chunks.text for keyword search
+      vec_chunks   sqlite-vec virtual table for vector similarity search
     """
     conn = get_connection()
 
@@ -111,5 +108,5 @@ def get_stats() -> dict:
 if __name__ == "__main__":
     init_db()
     stats = get_stats()
-    print(f"DB initialised — {stats['chunks']} chunks across {stats['files']} files")
+    print(f"DB initialised, {stats['chunks']} chunks across {stats['files']} files")
     print(f"Path: {DB_PATH}")

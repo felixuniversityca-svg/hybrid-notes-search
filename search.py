@@ -10,14 +10,14 @@ Usage:
     python search.py "embeddings" --path-prefix subfolder
     python search.py "hybrid search" --json     # machine-readable output
 """
-import warnings
-warnings.filterwarnings("ignore")
-
-import sys
+import os
+import re
 import json
+import sqlite3
 import argparse
 import numpy as np
 from pathlib import Path
+from typing import Optional
 
 from config import NOTES_DIR
 from db import get_connection
@@ -25,14 +25,37 @@ from embeddings import embed_one
 
 VECTOR_WEIGHT  = 0.7
 KEYWORD_WEIGHT = 0.3
-RRF_K = 60  # standard RRF constant: higher = gentler rank penalty
+RRF_K = 60          # standard RRF constant: higher = gentler rank penalty
+FANOUT = 3          # over-fetch factor per index before fusion trims to top_k
+
+
+def _dir_prefix(path_prefix: str) -> str:
+    """Absolute path prefix with a trailing separator, so 'sub' does not match 'subway.md'."""
+    return str(NOTES_DIR / path_prefix) + os.sep
+
+
+def _fts_match_query(query: str) -> Optional[str]:
+    """
+    Turn a raw query into a safe FTS5 MATCH expression.
+
+    A raw query is unsafe: in FTS5 '-' is the NOT operator (so "Black-Scholes"
+    means "Black NOT Scholes") and bare tokens are implicitly ANDed, so one
+    missing word drops the row. We split into word tokens, quote each so it is
+    treated literally, and join with OR. BM25 then ranks by how many (and how
+    rare) the matched tokens are. Returns None if the query has no word tokens.
+    """
+    tokens = re.findall(r"\w+", query.lower())
+    if not tokens:
+        return None
+    return " OR ".join(f'"{t}"' for t in tokens)
 
 
 def vector_search(conn, query_embedding: np.ndarray, top_k: int,
-                  path_prefix: str = None) -> list:
-    """Find top_k chunks by cosine similarity using sqlite-vec."""
+                  path_prefix: Optional[str] = None) -> list:
+    """Find top chunks by cosine similarity using sqlite-vec."""
     query_bytes = query_embedding.astype(np.float32).tobytes()
 
+    # sqlite-vec applies K as a hard KNN limit, so over-fetch and filter after.
     results = conn.execute("""
         SELECT c.id, c.file_path, c.text, v.distance
         FROM vec_chunks v
@@ -40,30 +63,36 @@ def vector_search(conn, query_embedding: np.ndarray, top_k: int,
         WHERE v.embedding MATCH ?
           AND K = ?
         ORDER BY v.distance ASC
-    """, (query_bytes, top_k * 3)).fetchall()
+    """, (query_bytes, top_k * FANOUT)).fetchall()
 
     if path_prefix:
-        full_prefix = str(NOTES_DIR / path_prefix)
-        results = [r for r in results if r["file_path"].startswith(full_prefix)]
+        boundary = _dir_prefix(path_prefix)
+        results = [r for r in results if r["file_path"].startswith(boundary)]
 
     return results[:top_k * 2]
 
 
 def keyword_search(conn, query: str, top_k: int,
-                   path_prefix: str = None) -> list:
-    """Find top_k chunks by BM25 keyword matching using FTS5 (porter stemming)."""
+                   path_prefix: Optional[str] = None) -> list:
+    """Find top chunks by BM25 keyword matching using FTS5 (porter stemming)."""
+    match = _fts_match_query(query)
+    if not match:
+        return []
+
     try:
         if path_prefix:
-            full_prefix = str(NOTES_DIR / path_prefix)
+            # Escape LIKE wildcards in the prefix so a literal % or _ is not a pattern.
+            like = (_dir_prefix(path_prefix)
+                    .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
             results = conn.execute("""
                 SELECT c.id, c.file_path, c.text, f.rank
                 FROM chunks_fts f
                 JOIN chunks c ON f.rowid = c.id
                 WHERE chunks_fts MATCH ?
-                  AND c.file_path LIKE ?
+                  AND c.file_path LIKE ? ESCAPE '\\'
                 ORDER BY f.rank
                 LIMIT ?
-            """, (query, f"{full_prefix}%", top_k * 2)).fetchall()
+            """, (match, like, top_k * 2)).fetchall()
         else:
             results = conn.execute("""
                 SELECT c.id, c.file_path, c.text, f.rank
@@ -72,9 +101,9 @@ def keyword_search(conn, query: str, top_k: int,
                 WHERE chunks_fts MATCH ?
                 ORDER BY f.rank
                 LIMIT ?
-            """, (query, top_k * 2)).fetchall()
-    except Exception:
-        # FTS5 can fail on special characters — fall back gracefully
+            """, (match, top_k * 2)).fetchall()
+    except sqlite3.OperationalError:
+        # Belt and suspenders: any residual FTS5 parse error degrades to vector-only.
         results = []
 
     return results
@@ -83,8 +112,9 @@ def keyword_search(conn, query: str, top_k: int,
 def rrf_merge(vector_results: list, keyword_results: list,
               top_k: int) -> list[dict]:
     """
-    Reciprocal Rank Fusion: items appearing high in both ranked lists
-    score best. Formula: score = sum(weight / (K + rank)).
+    Reciprocal Rank Fusion: items appearing high in both ranked lists score best.
+    Formula: score = sum(weight / (K + rank)). Scores are small and relative,
+    they rank results against each other and are not similarity values.
     """
     scores: dict[int, dict] = {}
 
@@ -106,7 +136,7 @@ def rrf_merge(vector_results: list, keyword_results: list,
     return merged[:top_k]
 
 
-def search(query: str, top_k: int = 5, path_prefix: str = None) -> list[dict]:
+def search(query: str, top_k: int = 5, path_prefix: Optional[str] = None) -> list[dict]:
     """Main search entrypoint: returns a list of result dicts."""
     conn = get_connection()
     try:

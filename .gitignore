@@ -1,5 +1,7 @@
 # Generated index
 data/
+eval/*.db
+eval/*.db-*
 
 # Python
 __pycache__/
