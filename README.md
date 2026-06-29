@@ -9,6 +9,8 @@ It combines two search methods and fuses them with Reciprocal Rank Fusion:
 
 So a note that never contains the words you typed can still be the top result, because the vector half matches on meaning.
 
+![Demo: searching notes by meaning](demo.gif)
+
 ## Demo
 
 ```
