@@ -1,5 +1,9 @@
 # hybrid-notes-search
 
+[![tests](https://github.com/felixuniversityca-svg/hybrid-notes-search/actions/workflows/test.yml/badge.svg)](https://github.com/felixuniversityca-svg/hybrid-notes-search/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+
 Hybrid semantic + keyword search over a folder of Markdown notes. Fully local, no API keys, runs offline after a one-time 23 MB model download.
 
 It combines two search methods and fuses them with Reciprocal Rank Fusion:
@@ -35,6 +39,15 @@ Top 3 results for 'running models on my laptop without the cloud'
 
 The top note never uses the words "laptop" or "cloud", yet it ranks first because the meaning matches. The keyword half complements this by pulling in exact-term hits that embeddings blur (codes, names, jargon).
 
+## Features
+
+- **Hybrid retrieval**: dense vectors for meaning, BM25 for exact terms, fused with Reciprocal Rank Fusion.
+- **Fully local and private**: no API keys, no cloud, one SQLite file. Offline after a one-time model download.
+- **Incremental indexing**: re-indexes only files whose modification time changed.
+- **Point it at any folder** of Markdown via `NOTES_DIR`, no config files.
+- **Composable**: `--json` output pipes into other tools; `--path-prefix` scopes a search.
+- **Tested and measured**: unit tests for the fusion logic plus a reproducible retrieval eval.
+
 ## Requirements
 
 Python 3.10+ built with SQLite loadable-extension support (`sqlite-vec` needs it). Most Linux distro Pythons and Homebrew's macOS Python work; the macOS **system** Python does not. On macOS, `brew install python` and use that interpreter. Verify any interpreter with:
@@ -57,6 +70,8 @@ pip install -r requirements.txt
 python index.py                      # build the index (downloads the model on first run)
 python search.py "reciprocal rank fusion"
 ```
+
+Prefer a CLI? `pip install -e .` installs `notes-index` and `notes-search` commands that work from any directory.
 
 ## Use it on your own notes
 
@@ -98,6 +113,13 @@ Read it honestly: hybrid matches the better component on every query and never d
 ```bash
 python test_search.py     # unit checks for the RRF merge, no DB or model needed
 ```
+
+## Limitations and non-goals
+
+- **Single machine, single user.** No server, no concurrent writers. It is a personal tool, not a service.
+- **Markdown only.** No PDF, DOCX, or HTML ingestion. Convert first if you need them.
+- **Re-index is manual.** Run `index.py` to pick up changes; there is no file watcher.
+- **Deliberately not included:** LLM reranking, an MCP server, GPU acceleration. They add maintenance surface without changing the core idea, point the tool at your notes and search them locally.
 
 ## Tech
 
