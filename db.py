@@ -18,6 +18,20 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
+    # sqlite-vec needs loadable-extension support, which some Python builds
+    # (notably the macOS system Python) ship disabled. Fail with a clear fix.
+    if not hasattr(conn, "enable_load_extension"):
+        raise RuntimeError(
+            "This Python's sqlite3 was built without loadable-extension support, "
+            "which sqlite-vec requires.\n"
+            "  The macOS system Python has it disabled. Install a Python that "
+            "supports it (macOS: `brew install python`), then recreate the venv "
+            "with that interpreter.\n"
+            "  Check any interpreter with:\n"
+            "    python3 -c \"import sqlite3; "
+            "print(hasattr(sqlite3.connect(':memory:'), 'enable_load_extension'))\""
+        )
+
     # Load the sqlite-vec extension
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)

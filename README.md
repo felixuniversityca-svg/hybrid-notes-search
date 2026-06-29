@@ -29,6 +29,15 @@ Top 3 results for 'how do I combine two ranked lists'
 
 The query shares no words with the top result. That is the vector half doing its job; the keyword half pulls in exact-term matches the embeddings would miss.
 
+## Requirements
+
+Python 3.10+ built with SQLite loadable-extension support (`sqlite-vec` needs it). Most Linux distro Pythons and Homebrew's macOS Python work; the macOS **system** Python does not. On macOS, `brew install python` and use that interpreter. Verify any interpreter with:
+
+```bash
+python3 -c "import sqlite3; print(hasattr(sqlite3.connect(':memory:'), 'enable_load_extension'))"
+# must print True
+```
+
 ## Quickstart
 
 Runs out of the box on the sample notes in `notes/`:
